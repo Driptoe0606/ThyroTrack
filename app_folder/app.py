@@ -40,34 +40,47 @@ st.markdown("""
 # ==========================================
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):
-    # Segmentation model (PyTorch .pth)
     seg_model = None
     rf_model = None
     vgg_feat = None
 
-    # Load segmentation model (assumed to be a PyTorch state_dict or scripted module)
+    # ------------------------
+    # 1) Segmentation model
+    # ------------------------
     seg_path = "app_folder/best_unet.pth"
+
+    class UNet(nn.Module):
+        """Minimal UNet skeleton. Replace with your full model architecture."""
+        def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
+            super().__init__()
+            self.encoder = nn.Sequential(
+                nn.Conv2d(in_channels, features[0], 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(features[0], features[0], 3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+            self.decoder = nn.Sequential(
+                nn.Conv2d(features[0], out_channels, 1)
+            )
+        def forward(self, x):
+            x = self.encoder(x)
+            x = self.decoder(x)
+            return x
+
     if os.path.exists(seg_path):
         try:
-            # We try several common load patterns:
-            # 1) scripted/traced module saved with torch.jit.save
-            # 2) state_dict for a common UNet class (user must have saved state_dict)
-            # 3) full torch.save(module)
+            # try loading as scripted/traced module first
             try:
                 seg_model = torch.jit.load(seg_path, map_location=device)
             except Exception:
-                # try loading as state dict into a generic small UNet skeleton if needed
-                # If you have a custom UNet class, replace this block by your model class.
-                # We'll attempt to load as a full object first:
                 loaded = torch.load(seg_path, map_location=device)
-                if isinstance(loaded, dict) and "state_dict" in loaded:
-                    # saved checkpoint with "state_dict"
-                    state = loaded["state_dict"]
-                    # user must supply UNet class if needed; fallback: try load as module
-                    seg_model = torch.nn.Module()
-                    seg_model.load_state_dict(state)  # may fail if shape mismatch
+                if isinstance(loaded, dict):
+                    # either plain state_dict or checkpoint with "state_dict" key
+                    state = loaded.get("state_dict", loaded)
+                    seg_model = UNet(in_channels=3, out_channels=1)
+                    seg_model.load_state_dict(state)
                 else:
-                    # loaded is likely a module
+                    # assume full saved model
                     seg_model = loaded
             seg_model.to(device)
             seg_model.eval()
@@ -77,7 +90,9 @@ def load_all_models(device="cpu"):
     else:
         st.error("Segmentation model file not found (app_folder/best_unet.pth).")
 
-    # Load Random Forest classifier (joblib)
+    # ------------------------
+    # 2) Random Forest classifier
+    # ------------------------
     rf_path = "app_folder/thyroid_rf_classifier.pkl"
     if os.path.exists(rf_path):
         try:
@@ -88,13 +103,16 @@ def load_all_models(device="cpu"):
     else:
         st.error("Random Forest classifier file not found (app_folder/thyroid_rf_classifier.pkl).")
 
-    # Load VGG16 feature extractor (torchvision)
+    # ------------------------
+    # 3) VGG16 feature extractor
+    # ------------------------
     try:
-        # create a feature extractor that returns a 512-d vector (avg pooled)
         vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-        feat_extractor = nn.Sequential(*list(vgg.features.children()),
-                                       nn.AdaptiveAvgPool2d((1, 1)))
-        # Add a flatten wrapper
+        feat_extractor = nn.Sequential(
+            *list(vgg.features.children()),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
+
         class FeatWrapper(nn.Module):
             def __init__(self, module):
                 super().__init__()
@@ -102,6 +120,7 @@ def load_all_models(device="cpu"):
             def forward(self, x):
                 x = self.module(x)
                 return x.view(x.size(0), -1)
+
         vgg_feat = FeatWrapper(feat_extractor).to(device)
         vgg_feat.eval()
     except Exception as e:
@@ -109,10 +128,7 @@ def load_all_models(device="cpu"):
         vgg_feat = None
 
     return seg_model, rf_model, vgg_feat
-
-device = "cpu"  # Streamlit Cloud typically uses CPU-only environment
-seg_model, rf_model, vgg_feat = load_all_models(device=device)
-
+    
 # ==========================================
 # 3. HELPERS (Pillow + NumPy replacements for OpenCV)
 # ==========================================

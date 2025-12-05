@@ -12,6 +12,7 @@ from scipy import ndimage
 import torch.nn as nn
 import torch.nn.functional as F
 
+# 1) DoubleConv helper
 class DoubleConv(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
@@ -25,7 +26,48 @@ class DoubleConv(nn.Module):
         )
     def forward(self, x):
         return self.net(x)
+
+# 2) UNet architecture
+class UNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, features=(32,64,128,256)):
+        super().__init__()
+        self.downs = nn.ModuleList()
+        self.ups = nn.ModuleList()
+        ch = in_channels
+        for f in features:
+            self.downs.append(DoubleConv(ch, f))
+            ch = f
+        self.pool = nn.MaxPool2d(2,2)
+        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
+        rev = list(reversed(features))
+        up_in = features[-1]*2
+        for f in rev:
+            self.ups.append(nn.ConvTranspose2d(up_in, f, kernel_size=2, stride=2))
+            self.ups.append(DoubleConv(up_in, f))
+            up_in = f
+        self.final = nn.Conv2d(features[0], out_channels, kernel_size=1)
         
+    def forward(self, x):
+        skips = []
+        out = x
+        for d in self.downs:
+            out = d(out)
+            skips.append(out)
+            out = self.pool(out)
+        out = self.bottleneck(out)
+        skips = skips[::-1]
+        idx = 0
+        for i in range(0, len(self.ups), 2):
+            trans = self.ups[i]
+            conv = self.ups[i+1]
+            out = trans(out)
+            skip = skips[idx]; idx += 1
+            if out.shape[2:] != skip.shape[2:]:
+                out = F.interpolate(out, size=skip.shape[2:])
+            out = torch.cat([skip, out], dim=1)
+            out = conv(out)
+        return self.final(out)
+
 # ==========================================
 # 1. CONFIG & STYLES
 # ==========================================

@@ -191,9 +191,14 @@ vgg_transform = T.Compose([
 # ==========================================
 # 4. DIAGNOSE FUNCTION (uses PyTorch models)
 # ==========================================
-def diagnose(img_arr):
+def diagnose(img_arr, seg_model, rf_model, vgg_feat, device="cpu"):
     """
     img_arr: HxWx3 uint8 RGB numpy array
+    seg_model: PyTorch segmentation model
+    rf_model: Random Forest classifier
+    vgg_feat: VGG feature extractor
+    device: "cpu" or "cuda"
+    
     returns: resized_orig, heatmap, crop_vgg (128x128 numpy), diagnosis, confidence, color
     """
     if seg_model is None or rf_model is None or vgg_feat is None:
@@ -208,14 +213,13 @@ def diagnose(img_arr):
         try:
             out = seg_model(seg_tensor)
         except Exception as e:
-            # try common pattern where model returns dict or tuple
             try:
                 out = seg_model(seg_tensor)[0]
             except Exception as e2:
                 st.error(f"Segmentation model inference failed: {e}; {e2}")
                 return img_arr, img_arr, None, "Segmentation Error", 0.0, "#000000"
 
-    # assume model output is logits or probabilities single-channel
+    # Process model output
     if isinstance(out, torch.Tensor):
         pred = out.squeeze().cpu()
     elif isinstance(out, (list, tuple)):
@@ -223,37 +227,36 @@ def diagnose(img_arr):
     else:
         pred = torch.tensor(out).squeeze()
 
-    # If logits (values outside 0-1), apply sigmoid
+    # Apply sigmoid if needed
     pred_np = pred.numpy()
     if pred_np.max() > 1.0 or pred_np.min() < 0.0:
-        pred_np = 1.0 / (1.0 + np.exp(-pred_np))  # sigmoid
+        pred_np = 1.0 / (1.0 + np.exp(-pred_np))
 
-    # Binarize mask using adaptive threshold rule
+    # Binarize mask
     threshold = 0.3 if pred_np.max() > 0.3 else 0.5
     pred_bin = (pred_np > threshold).astype(np.uint8)
 
-    # Create heatmap overlay on resized seg_input (converted back to uint8)
+    # Heatmap overlay
     seg_input_uint8 = (seg_input * 255).astype(np.uint8)
     heatmap_img = create_heatmap(seg_input_uint8, pred_np)
 
-    # Find largest connected component bounding box
+    # Find largest connected component
     bbox = get_connected_component_bbox(pred_bin)
     if bbox is None:
         return seg_input_uint8, heatmap_img, None, "No Nodule Detected", 0.0, "#000000"
 
     x, y, w, h = bbox
-    # pad and clamp
     pad = 10
     x = max(0, x - pad); y = max(0, y - pad)
     w = min(256 - x, w + 2 * pad); h = min(256 - y, h + 2 * pad)
     crop = seg_input_uint8[y:y+h, x:x+w]
 
-    # prepare crop for VGG feature extractor
+    # Prepare crop for VGG feature extractor
     crop_pil = Image.fromarray(crop)
     crop_tensor = vgg_transform(np.asarray(crop_pil)).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        feats = vgg_feat(crop_tensor)  # shape (1, 512)
+        feats = vgg_feat(crop_tensor)
     feats_np = feats.cpu().numpy().reshape(1, -1)
 
     try:
@@ -262,23 +265,15 @@ def diagnose(img_arr):
         st.error(f"Classifier predict_proba failed: {e}")
         return seg_input_uint8, heatmap_img, np.asarray(crop_pil.resize((128,128))), "Classifier Error", 0.0, "#000000"
 
-    # Interpret probabilities (assumes rf_model classes are [benign, suspicious, malignant])
-    # If class ordering is different, adjust accordingly.
+    # Interpret probabilities
     if len(probs) >= 3:
         if probs[2] > 0.25:
-            diag = "Malignant"
-            conf = float(probs[2])
-            color = "#ff4b4b"
+            diag = "Malignant"; conf = float(probs[2]); color = "#ff4b4b"
         elif probs[1] > probs[0]:
-            diag = "Suspicious"
-            conf = float(probs[1])
-            color = "#ffa500"
+            diag = "Suspicious"; conf = float(probs[1]); color = "#ffa500"
         else:
-            diag = "Benign"
-            conf = float(probs[0])
-            color = "#4caf50"
+            diag = "Benign"; conf = float(probs[0]); color = "#4caf50"
     else:
-        # fallback: take top class
         top_idx = int(np.argmax(probs))
         conf = float(probs[top_idx])
         diag = str(rf_model.classes_[top_idx]) if hasattr(rf_model, "classes_") else f"Class {top_idx}"
@@ -287,10 +282,13 @@ def diagnose(img_arr):
     crop_vgg = np.asarray(crop_pil.resize((128, 128)))
     return seg_input_uint8, heatmap_img, crop_vgg, diag, conf, color
 
+
 # ==========================================
 # 5. MAIN UI
 # ==========================================
 st.title("🏥 Thyroid Ultrasound AI Diagnostic System")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+seg_model, rf_model, vgg_feat = load_all_models(device=device)
 st.write("Upload an ultrasound image to detect nodules and classify malignancy risk.")
 
 uploaded_file = st.file_uploader("Choose an Ultrasound Image...", type=["jpg", "jpeg", "png"])
@@ -298,7 +296,10 @@ uploaded_file = st.file_uploader("Choose an Ultrasound Image...", type=["jpg", "
 if uploaded_file is not None:
     with st.spinner('Analyzing Image...'):
         original_img = process_image_pil(uploaded_file)
-        resized_orig, heatmap, crop, diagnosis, confidence, color = diagnose(original_img)
+        # Pass the models and device explicitly
+        resized_orig, heatmap, crop, diagnosis, confidence, color = diagnose(
+            original_img, seg_model, rf_model, vgg_feat, device=device
+        )
 
     st.markdown(f"""
     <div class="diagnosis-box" style="background-color: {color}20; border: 2px solid {color};">

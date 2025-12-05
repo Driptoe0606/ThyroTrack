@@ -1,6 +1,9 @@
 streamlit
 numpy
-tensorflow==2.20.0
-joblib
 Pillow
+torch
+torchvision
+joblib
 scikit-learn
+matplotlib
+scipy

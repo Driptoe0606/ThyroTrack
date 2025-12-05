@@ -5,12 +5,27 @@ import numpy as np
 from PIL import Image
 import joblib
 import torch
-import torch.nn as nn
 import torchvision.transforms as T
 import torchvision.models as models
 import matplotlib.cm as cm
 from scipy import ndimage
+import torch.nn as nn
+import torch.nn.functional as F
 
+class DoubleConv(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+    def forward(self, x):
+        return self.net(x)
+        
 # ==========================================
 # 1. CONFIG & STYLES
 # ==========================================
@@ -47,68 +62,54 @@ st.markdown("""
 
 # app.py (Define this class globally or right before load_all_models)
 class UNet(nn.Module):
-    """
-    This structure attempts to match the TensorFlow/Keras architecture
-    from your previous code (Feature Fusion Network).
-    It is crucial that this EXACTLY matches your saved .pth file model.
-    """
-    def __init__(self, in_channels=3, out_channels=1):
+    def __init__(self, in_channels=3, out_channels=1, features=(32,64,128,256)):
         super().__init__()
+        self.downs = nn.ModuleList()
+        self.ups = nn.ModuleList()
+        ch = in_channels
+        for f in features:
+            self.downs.append(DoubleConv(ch, f))
+            ch = f
+        self.pool = nn.MaxPool2d(2,2)
+        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
+        rev = list(reversed(features))
+        up_in = features[-1]*2
+        for f in rev:
+            self.ups.append(nn.ConvTranspose2d(up_in, f, kernel_size=2, stride=2))
+            self.ups.append(DoubleConv(up_in, f))
+            up_in = f
+        self.final = nn.Conv2d(features[0], out_channels, kernel_size=1)
         
-        # Encoder Path
-        self.conv1 = nn.Conv2d(in_channels, 64, 3, padding=1)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.pool1 = nn.MaxPool2d(2)
-        
-        self.conv2 = nn.Conv2d(64, 128, 3, padding=1)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.pool2 = nn.MaxPool2d(2)
-        
-        # Bottleneck
-        self.bottleneck = nn.Conv2d(128, 256, 3, padding=1)
-        self.relu_b = nn.ReLU(inplace=True)
-        
-        # Decoder Path (The names are critical!)
-        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.deconv1 = nn.Conv2d(256, 128, 3, padding=1)
-        # Concatenation happens in forward pass
-        
-        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.deconv2 = nn.Conv2d(128 + 64, 64, 3, padding=1) # 128 from deconv1 + 64 from conv1
-        # Concatenation happens in forward pass
-
-        # Output Layer
-        self.output_conv = nn.Conv2d(64 + 64, out_channels, 1) # 64 from deconv2 + 64 from conv1 (check sizes!)
-        self.sigmoid = nn.Sigmoid()
-
     def forward(self, x):
+        skips = []
+        out = x
+        
         # Encoder
-        c1 = self.relu1(self.conv1(x)) # Saved for skip connection (64 channels)
-        p1 = self.pool1(c1)
-        
-        c2 = self.relu2(self.conv2(p1)) # Saved for skip connection (128 channels)
-        p2 = self.pool2(c2)
-        
+        for d in self.downs:
+            out = d(out)
+            skips.append(out)
+            out = self.pool(out)
+            
         # Bottleneck
-        b = self.relu_b(self.bottleneck(p2))
-
-        # Decoder 1
-        u1 = self.up1(b)
-        d1 = self.deconv1(u1)
+        out = self.bottleneck(out)
+        skips = skips[::-1]
         
-        # The Concatenate Layer (You MUST check the tensor shapes and channel counts!)
-        c_cat1 = torch.cat([d1, c2], dim=1) # Concatenate with C2 (128 + 128 = 256 channels)
-
-        # Decoder 2
-        u2 = self.up2(c_cat1)
-        d2 = self.deconv2(u2) 
-        
-        # The Concatenate Layer (You MUST check the tensor shapes and channel counts!)
-        c_cat2 = torch.cat([d2, c1], dim=1) # Concatenate with C1 (64 + 64 = 128 channels)
-
-        # Output
-        out = self.output_conv(c_cat2)
-        return self.sigmoid(out)
+        # Decoder
+        idx = 0
+        for i in range(0, len(self.ups), 2):
+            trans = self.ups[i]
+            conv = self.ups[i+1]
+            out = trans(out)
+            skip = skips[idx]; idx += 1
+            
+            # Skip connection handling (resize if needed)
+            if out.shape[2:] != skip.shape[2:]:
+                out = F.interpolate(out, size=skip.shape[2:]) # Use F.interpolate here
+                
+            out = torch.cat([skip, out], dim=1)
+            out = conv(out)
+            
+        return self.final(out)
 
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):

@@ -90,33 +90,27 @@ class UNet(nn.Module):
 def load_all_models(device="cpu"):
     seg_model, rf_model, vgg_feat = None, None, None
 
-    # ---- 1) Segmentation model ----
-    seg_path = "app_folder/best_unet.pth"
-    if os.path.exists(seg_path):
-        try:
-            seg_model = UNet(features=(32,64,128,256), out_channels=1).to(device)
-            seg_model.load_state_dict(state_dict, strict=False)
-            seg_model.eval()
-            checkpoint = torch.load(seg_path, map_location=device)
-            
-            if isinstance(checkpoint, dict):
-                if "model_state" in checkpoint:
-                    state_dict = checkpoint["model_state"]
-                elif "state_dict" in checkpoint:
-                    state_dict = checkpoint["state_dict"]
-                else:
-                    state_dict = checkpoint
-            else:
-                state_dict = checkpoint
+seg_model = UNet(features=(32,64,128,256), out_channels=1).to(device)
 
-            seg_model.load_state_dict(state_dict, strict=False)
-            seg_model.eval()
-            st.info("Segmentation model loaded successfully.")
-        except Exception as e:
-            st.error(f"Failed to load UNet: {e}")
-            seg_model = None
+# Load checkpoint first
+checkpoint = torch.load(seg_path, map_location=device)
+
+# Extract state_dict
+if isinstance(checkpoint, dict):
+    if "model_state" in checkpoint:
+        state_dict = checkpoint["model_state"]
+    elif "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
     else:
-        st.error(f"Segmentation model file not found at: {seg_path}")
+        state_dict = checkpoint
+else:
+    state_dict = checkpoint
+
+# Then load the state dict
+seg_model.load_state_dict(state_dict, strict=False)
+seg_model.eval()
+st.info("Segmentation model loaded successfully.")
+
 
     # ---- 2) Random Forest model ----
     rf_path = "app_folder/thyroid_rf_classifier.pkl"

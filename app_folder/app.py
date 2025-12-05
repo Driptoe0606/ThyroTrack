@@ -75,8 +75,8 @@ def load_all_models(device="cpu"):
             except Exception:
                 loaded = torch.load(seg_path, map_location=device)
                 if isinstance(loaded, dict):
-                    # either plain state_dict or checkpoint with "state_dict" key
-                    state = loaded.get("state_dict", loaded)
+                    # If weights are under 'model_state', use that
+                    state = loaded.get("model_state", loaded)
                     seg_model = UNet(in_channels=3, out_channels=1)
                     seg_model.load_state_dict(state)
                 else:
@@ -89,6 +89,7 @@ def load_all_models(device="cpu"):
             seg_model = None
     else:
         st.error("Segmentation model file not found (app_folder/best_unet.pth).")
+
 
     # ------------------------
     # 2) Random Forest classifier
@@ -287,9 +288,11 @@ def diagnose(img_arr, seg_model, rf_model, vgg_feat, device="cpu"):
 # 5. MAIN UI
 # ==========================================
 st.title("🏥 Thyroid Ultrasound AI Diagnostic System")
+st.write("Upload an ultrasound image to detect nodules and classify malignancy risk.")
+
+# Load models once
 device = "cuda" if torch.cuda.is_available() else "cpu"
 seg_model, rf_model, vgg_feat = load_all_models(device=device)
-st.write("Upload an ultrasound image to detect nodules and classify malignancy risk.")
 
 uploaded_file = st.file_uploader("Choose an Ultrasound Image...", type=["jpg", "jpeg", "png"])
 

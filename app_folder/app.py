@@ -51,115 +51,57 @@ st.markdown("""
     """, unsafe_allow_html=True)
 # app.py (PyTorch + Pillow version)
 
-# ... (Imports)
-
 # ==========================================
 # 2. MODEL LOADING (PyTorch + joblib)
 # ==========================================
 
-# NOTE: The UNet class MUST be defined *before* load_all_models calls it, 
-# or inside load_all_models before its first use. Placing it globally is clearer.
-
-# app.py (Define this class globally or right before load_all_models)
-class UNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, features=(32,64,128,256)):
-        super().__init__()
-        self.downs = nn.ModuleList()
-        self.ups = nn.ModuleList()
-        ch = in_channels
-        for f in features:
-            self.downs.append(DoubleConv(ch, f))
-            ch = f
-        self.pool = nn.MaxPool2d(2,2)
-        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
-        rev = list(reversed(features))
-        up_in = features[-1]*2
-        for f in rev:
-            self.ups.append(nn.ConvTranspose2d(up_in, f, kernel_size=2, stride=2))
-            self.ups.append(DoubleConv(up_in, f))
-            up_in = f
-        self.final = nn.Conv2d(features[0], out_channels, kernel_size=1)
-        
-    def forward(self, x):
-        skips = []
-        out = x
-        
-        # Encoder
-        for d in self.downs:
-            out = d(out)
-            skips.append(out)
-            out = self.pool(out)
-            
-        # Bottleneck
-        out = self.bottleneck(out)
-        skips = skips[::-1]
-        
-        # Decoder
-        idx = 0
-        for i in range(0, len(self.ups), 2):
-            trans = self.ups[i]
-            conv = self.ups[i+1]
-            out = trans(out)
-            skip = skips[idx]; idx += 1
-            
-            # Skip connection handling (resize if needed)
-            if out.shape[2:] != skip.shape[2:]:
-                out = F.interpolate(out, size=skip.shape[2:]) # Use F.interpolate here
-                
-            out = torch.cat([skip, out], dim=1)
-            out = conv(out)
-            
-        return self.final(out)
-
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):
+    """
+    Safely loads all models required for diagnosis:
+    - UNet segmentation model (best_unet.pth)
+    - Random Forest classifier (thyroid_rf_classifier.pkl)
+    - VGG16 feature extractor for patch embeddings
+    """
     seg_model = None
     rf_model = None
     vgg_feat = None
-    
+
     # ------------------------
     # 1) Segmentation model
     # ------------------------
-    seg_path = "app_folder/best_unet.pth" # <<< DEFINED HERE
+    seg_path = "app_folder/best_unet.pth"
 
     if os.path.exists(seg_path):
-        # 1. Instantiate the UNet model FIRST
+        # Instantiate UNet first
         try:
             seg_model = UNet().to(device)
         except Exception as e:
             st.error(f"Failed to instantiate UNet architecture: {e}")
             seg_model = None
-            
-        if seg_model is not None:
+
+        if seg_model:
             try:
-                # Attempt to load state dictionary using the robust method
-                
-                # 1a. Try loading as scripted/traced module (JIT)
+                # Attempt to load as JIT module first
                 try:
                     loaded_module = torch.jit.load(seg_path, map_location=device)
                     seg_model.load_state_dict(loaded_module.state_dict())
                     st.info("Loaded UNet from torch.jit.load.")
-                
-                # 1b. Fallback: load as standard state dictionary
                 except Exception:
+                    # Fallback: standard state dictionary
                     state_dict = torch.load(seg_path, map_location=device)
-                    
-                    # Extract 'state_dict' if the model was saved as a training checkpoint
-                    if isinstance(state_dict, dict) and 'state_dict' in state_dict:
-                        state_dict = state_dict['state_dict']
-                        
+                    # Handle checkpoints saved with 'state_dict' key
+                    if isinstance(state_dict, dict) and "state_dict" in state_dict:
+                        state_dict = state_dict["state_dict"]
                     seg_model.load_state_dict(state_dict)
                     st.info("Loaded UNet from state dictionary.")
-
                 seg_model.eval()
-                
             except Exception as e_load:
-                st.error(f"Could not load UNet weights (best_unet.pth): {e_load}")
+                st.error(f"Could not load UNet weights: {e_load}")
                 seg_model = None
     else:
         st.error(f"Segmentation model file not found at: {seg_path}")
-        seg_model = None
-        
+
     # ------------------------
     # 2) Random Forest classifier
     # ------------------------
@@ -169,10 +111,8 @@ def load_all_models(device="cpu"):
             rf_model = joblib.load(rf_path)
         except Exception as e:
             st.error(f"Could not load Random Forest classifier: {e}")
-            rf_model = None
     else:
         st.error(f"Random Forest classifier file not found at: {rf_path}")
-        rf_model = None
 
     # ------------------------
     # 3) VGG16 feature extractor
@@ -196,9 +136,9 @@ def load_all_models(device="cpu"):
         vgg_feat.eval()
     except Exception as e:
         st.error(f"Could not initialize VGG feature extractor: {e}")
-        vgg_feat = None
 
     return seg_model, rf_model, vgg_feat
+
     
 # ==========================================
 # 3. HELPERS (Pillow + NumPy replacements for OpenCV)

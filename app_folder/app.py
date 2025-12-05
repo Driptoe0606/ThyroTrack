@@ -75,10 +75,10 @@ def load_all_models(device="cpu"):
             except Exception:
                 loaded = torch.load(seg_path, map_location=device)
                 if isinstance(loaded, nn.Module):
-                    seg_model = loaded
+                    seg_model = loaded.to(device)
+                    seg_model.eval()
                 else:
-                    # If it's a dict containing 'model_state', you must use the correct UNet class
-                    seg_model = None  # you still need the correct architecture
+                    st.error("Checkpoint is not a full model. You need the original UNet class.")
 
             seg_model.to(device)
             seg_model.eval()

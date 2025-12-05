@@ -95,10 +95,21 @@ def load_all_models(device="cpu"):
     if os.path.exists(seg_path):
         try:
             seg_model = UNet().to(device)
-            state = torch.load(seg_path, map_location=device)
-            if isinstance(state, dict) and "state_dict" in state:
-                state = state["state_dict"]
-            seg_model.load_state_dict(state)
+            checkpoint = torch.load(seg_path, map_location=device)
+    
+            # Check if it's a full checkpoint
+            if isinstance(checkpoint, dict):
+                if "model_state" in checkpoint:
+                    state_dict = checkpoint["model_state"]
+                elif "state_dict" in checkpoint:
+                    state_dict = checkpoint["state_dict"]
+                else:
+                    # fallback: assume whole dict is state_dict
+                    state_dict = checkpoint
+            else:
+                state_dict = checkpoint
+    
+            seg_model.load_state_dict(state_dict)
             seg_model.eval()
             st.info("Segmentation model loaded successfully.")
         except Exception as e:

@@ -40,10 +40,47 @@ st.markdown("""
 # ==========================================
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):
-    seg_model = None
-    rf_model = None
-    vgg_feat = None
+    # ... (Model definitions and paths)
 
+    if os.path.exists(seg_path):
+        try:
+            # 1. Instantiate the UNet model (Crucial Step)
+            # Make sure this UNet(..) signature matches your trained model exactly!
+            seg_model = UNet().to(device) 
+            
+            # 2. Try loading as scripted/traced module first (Optional but good practice)
+            try:
+                loaded_module = torch.jit.load(seg_path, map_location=device)
+                seg_model.load_state_dict(loaded_module.state_dict())
+                st.info("Loaded UNet from torch.jit.load") # Add a check to see which one succeeds
+            
+            # 3. If that fails, assume it's a state dictionary and load it
+            except Exception as e_jit:
+                # Load the state dictionary
+                state_dict = torch.load(seg_path, map_location=device)
+                
+                # Check if it's an OrderedDict (standard state_dict format)
+                if isinstance(state_dict, dict) and 'state_dict' in state_dict:
+                    # If you saved with a wrapper, extract the state_dict
+                    state_dict = state_dict['state_dict']
+                
+                # Load the weights into the instantiated model
+                seg_model.load_state_dict(state_dict)
+                st.info("Loaded UNet from torch.load (state_dict)")
+
+            # 4. Final configuration
+            seg_model.eval() 
+            
+        except Exception as e:
+            # This catches errors in instantiation or state_dict loading
+            st.error(f"Could not load segmentation model: {e}")
+            seg_model = None
+    else:
+        st.error("Segmentation model file not found (app_folder/best_unet.pth).")
+
+    # ... (Rest of the function)
+    return seg_model, rf_model, vgg_feat
+    
     # ------------------------
     # 1) Segmentation model
     # ------------------------

@@ -122,17 +122,6 @@ if os.path.exists(seg_path):
 else:
     st.error(f"Segmentation model file not found at: {seg_path}")
 
-    # ---- 2) Random Forest ----
-    rf_path = "app_folder/thyroid_rf_classifier.pkl"
-    if os.path.exists(rf_path):
-        try:
-            rf_model = joblib.load(rf_path)
-        except Exception as e:
-            st.error(f"Could not load Random Forest classifier: {e}")
-            rf_model = None
-    else:
-        st.error(f"Random Forest classifier file not found at: {rf_path}")
-
     # ---- 3) VGG16 feature extractor ----
     try:
         vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)

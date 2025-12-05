@@ -1,4 +1,4 @@
-# app.py (PyTorch + Pillow version)
+se# app.py (PyTorch + Pillow version)
 import os
 import streamlit as st
 import numpy as np
@@ -94,7 +94,9 @@ def load_all_models(device="cpu"):
     seg_path = "app_folder/best_unet.pth"
     if os.path.exists(seg_path):
         try:
-            seg_model = UNet(features=(64,128,256,512), out_channels=1).to(device)
+            seg_model = UNet(features=(32,64,128,256), out_channels=1).to(device)
+            seg_model.load_state_dict(state_dict, strict=False)
+            seg_model.eval()
             checkpoint = torch.load(seg_path, map_location=device)
             
             if isinstance(checkpoint, dict):

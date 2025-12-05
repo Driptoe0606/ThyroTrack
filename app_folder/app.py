@@ -40,7 +40,9 @@ st.markdown("""
 # ==========================================
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):
-    # ... (Model definitions and paths)
+    seg_model = None
+    rf_model = None
+    vgg_feat = None
 
     if os.path.exists(seg_path):
         try:
@@ -86,44 +88,48 @@ def load_all_models(device="cpu"):
     # ------------------------
     seg_path = "app_folder/best_unet.pth"
 
+    # Define UNet class (Keep this here)
     class UNet(nn.Module):
-        """Minimal UNet skeleton. Replace with your full model architecture."""
-        def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
-            super().__init__()
-            self.encoder = nn.Sequential(
-                nn.Conv2d(in_channels, features[0], 3, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(features[0], features[0], 3, padding=1),
-                nn.ReLU(inplace=True)
-            )
-            self.decoder = nn.Sequential(
-                nn.Conv2d(features[0], out_channels, 1)
-            )
-        def forward(self, x):
-            x = self.encoder(x)
-            x = self.decoder(x)
-            return x
+        # ... (full UNet definition)
 
     if os.path.exists(seg_path):
+        # Instantiate the model FIRST, even if loading fails.
+        # This makes the variable SEG_MODEL defined locally.
         try:
-            # try loading as scripted/traced module first
-            try:
-                seg_model = torch.jit.load(seg_path, map_location=device)
-            except Exception:
-                loaded = torch.load(seg_path, map_location=device)
-                if isinstance(loaded, nn.Module):
-                    seg_model = loaded.to(device)
-                    seg_model.eval()
-                else:
-                    st.error("Checkpoint is not a full model. You need the original UNet class.")
-
-            seg_model.to(device)
-            seg_model.eval()
+            # Instantiate the UNet skeleton you defined
+            seg_model = UNet().to(device) 
         except Exception as e:
-            st.error(f"Could not load segmentation model: {e}")
-            seg_model = None
+            st.error(f"Failed to instantiate UNet: {e}")
+            seg_model = None # It's already None, but this is explicit
+
+        if seg_model is not None:
+            try:
+                # 1. Try loading as scripted/traced module
+                loaded_jit = torch.jit.load(seg_path, map_location=device)
+                seg_model.load_state_dict(loaded_jit.state_dict())
+                
+            except Exception:
+                # 2. Fall back to loading state dictionary
+                try:
+                    state_dict = torch.load(seg_path, map_location=device)
+                    # Check for "state_dict" key if you saved the full training checkpoint
+                    if isinstance(state_dict, dict) and 'state_dict' in state_dict:
+                         state_dict = state_dict['state_dict']
+                    seg_model.load_state_dict(state_dict)
+                    
+                    st.info("Loaded UNet from state dictionary.")
+                    
+                except Exception as e_load:
+                    st.error(f"Checkpoint load error. Did you save the state_dict? {e_load}")
+                    st.error("Checkpoint is not a full model. You need the original UNet class.")
+                    seg_model = None # Force it to None if loading failed
+
+        if seg_model is not None:
+            seg_model.eval()
+            
     else:
         st.error("Segmentation model file not found (app_folder/best_unet.pth).")
+        seg_model = None # Explicitly set to None
 
 
     # ------------------------

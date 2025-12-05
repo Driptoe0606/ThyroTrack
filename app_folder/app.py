@@ -45,25 +45,70 @@ st.markdown("""
 # NOTE: The UNet class MUST be defined *before* load_all_models calls it, 
 # or inside load_all_models before its first use. Placing it globally is clearer.
 
-# Define UNet class (This needs to be the CORRECT architecture of your trained model)
+# app.py (Define this class globally or right before load_all_models)
 class UNet(nn.Module):
-    """Minimal UNet skeleton. Replace with your full model architecture."""
-    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
+    """
+    This structure attempts to match the TensorFlow/Keras architecture
+    from your previous code (Feature Fusion Network).
+    It is crucial that this EXACTLY matches your saved .pth file model.
+    """
+    def __init__(self, in_channels=3, out_channels=1):
         super().__init__()
-        # Simplified components for illustration - ensure this matches your .pth file!
-        self.encoder = nn.Sequential(
-            nn.Conv2d(in_channels, features[0], 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(features[0], features[0], 3, padding=1),
-            nn.ReLU(inplace=True)
-        )
-        self.decoder = nn.Sequential(
-            nn.Conv2d(features[0], out_channels, 1)
-        )
+        
+        # Encoder Path
+        self.conv1 = nn.Conv2d(in_channels, 64, 3, padding=1)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.pool1 = nn.MaxPool2d(2)
+        
+        self.conv2 = nn.Conv2d(64, 128, 3, padding=1)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.pool2 = nn.MaxPool2d(2)
+        
+        # Bottleneck
+        self.bottleneck = nn.Conv2d(128, 256, 3, padding=1)
+        self.relu_b = nn.ReLU(inplace=True)
+        
+        # Decoder Path (The names are critical!)
+        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.deconv1 = nn.Conv2d(256, 128, 3, padding=1)
+        # Concatenation happens in forward pass
+        
+        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.deconv2 = nn.Conv2d(128 + 64, 64, 3, padding=1) # 128 from deconv1 + 64 from conv1
+        # Concatenation happens in forward pass
+
+        # Output Layer
+        self.output_conv = nn.Conv2d(64 + 64, out_channels, 1) # 64 from deconv2 + 64 from conv1 (check sizes!)
+        self.sigmoid = nn.Sigmoid()
+
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+        # Encoder
+        c1 = self.relu1(self.conv1(x)) # Saved for skip connection (64 channels)
+        p1 = self.pool1(c1)
+        
+        c2 = self.relu2(self.conv2(p1)) # Saved for skip connection (128 channels)
+        p2 = self.pool2(c2)
+        
+        # Bottleneck
+        b = self.relu_b(self.bottleneck(p2))
+
+        # Decoder 1
+        u1 = self.up1(b)
+        d1 = self.deconv1(u1)
+        
+        # The Concatenate Layer (You MUST check the tensor shapes and channel counts!)
+        c_cat1 = torch.cat([d1, c2], dim=1) # Concatenate with C2 (128 + 128 = 256 channels)
+
+        # Decoder 2
+        u2 = self.up2(c_cat1)
+        d2 = self.deconv2(u2) 
+        
+        # The Concatenate Layer (You MUST check the tensor shapes and channel counts!)
+        c_cat2 = torch.cat([d2, c1], dim=1) # Concatenate with C1 (64 + 64 = 128 channels)
+
+        # Output
+        out = self.output_conv(c_cat2)
+        return self.sigmoid(out)
 
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):

@@ -86,41 +86,46 @@ class UNet(nn.Module):
 # ==========================================
 # 3. MODEL LOADING FUNCTION
 # ==========================================
-
 @st.cache_resource(show_spinner=False)
 def load_all_models(device="cpu"):
     seg_model, rf_model, vgg_feat = None, None, None
-# ---- 1) Segmentation model ----
-seg_path = "app_folder/best_unet.pth"
-if os.path.exists(seg_path):
-    try:
-        # Instantiate the UNet with features matching the checkpoint
-        seg_model = UNet(features=(64,128,256,512), out_channels=1).to(device)
-        
-        # Load checkpoint
-        checkpoint = torch.load(seg_path, map_location=device)
-        
-        # Extract state_dict from checkpoint if present
-        if isinstance(checkpoint, dict):
-            if "model_state" in checkpoint:
-                state_dict = checkpoint["model_state"]
-            elif "state_dict" in checkpoint:
-                state_dict = checkpoint["state_dict"]
+
+    # ---- 1) Segmentation model ----
+    seg_path = "app_folder/best_unet.pth"
+    if os.path.exists(seg_path):
+        try:
+            seg_model = UNet(features=(64,128,256,512), out_channels=1).to(device)
+            checkpoint = torch.load(seg_path, map_location=device)
+            
+            if isinstance(checkpoint, dict):
+                if "model_state" in checkpoint:
+                    state_dict = checkpoint["model_state"]
+                elif "state_dict" in checkpoint:
+                    state_dict = checkpoint["state_dict"]
+                else:
+                    state_dict = checkpoint
             else:
                 state_dict = checkpoint
-        else:
-            state_dict = checkpoint
-        
-        # Load the state dict with strict=False to skip mismatched layers
-        seg_model.load_state_dict(state_dict, strict=False)
-        seg_model.eval()  # Put model in evaluation mode
 
-        st.info("Segmentation model loaded successfully.")
-    except Exception as e:
-        st.error(f"Failed to load UNet: {e}")
-        seg_model = None
-else:
-    st.error(f"Segmentation model file not found at: {seg_path}")
+            seg_model.load_state_dict(state_dict, strict=False)
+            seg_model.eval()
+            st.info("Segmentation model loaded successfully.")
+        except Exception as e:
+            st.error(f"Failed to load UNet: {e}")
+            seg_model = None
+    else:
+        st.error(f"Segmentation model file not found at: {seg_path}")
+
+    # ---- 2) Random Forest model ----
+    rf_path = "app_folder/thyroid_rf_classifier.pkl"
+    if os.path.exists(rf_path):
+        try:
+            rf_model = joblib.load(rf_path)
+        except Exception as e:
+            st.error(f"Could not load Random Forest classifier: {e}")
+            rf_model = None
+    else:
+        st.error(f"Random Forest classifier file not found at: {rf_path}")
 
     # ---- 3) VGG16 feature extractor ----
     try:
@@ -143,6 +148,7 @@ else:
         vgg_feat = None
 
     return seg_model, rf_model, vgg_feat
+
 
 # ==========================================
 # 4. IMAGE HELPERS (Pillow + NumPy)

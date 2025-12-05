@@ -60,7 +60,7 @@ class UNet(nn.Module):
             self.ups.append(nn.ConvTranspose2d(up_in, f, kernel_size=2, stride=2))
             self.ups.append(DoubleConv(up_in, f))
             up_in = f
-        self.final = nn.Conv2d(features[0], out_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(features[-1], out_channels, kernel_size=1)
         
     def forward(self, x):
         skips = []

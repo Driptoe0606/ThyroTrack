@@ -114,6 +114,7 @@ def load_all_models(device="cpu"):
                 state_dict = checkpoint
     
             seg_model = UNet(features=(64,128,256,512), out_channels=1).to(device)
+            seg_model.load_state_dict(checkpoint["model_state"])
             seg_model.load_state_dict(state_dict)
             seg_model.eval()
             st.info("Segmentation model loaded successfully.")

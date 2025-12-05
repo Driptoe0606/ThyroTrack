@@ -74,14 +74,12 @@ def load_all_models(device="cpu"):
                 seg_model = torch.jit.load(seg_path, map_location=device)
             except Exception:
                 loaded = torch.load(seg_path, map_location=device)
-                if isinstance(loaded, dict):
-                    # If weights are under 'model_state', use that
-                    state = loaded.get("model_state", loaded)
-                    seg_model = UNet(in_channels=3, out_channels=1)
-                    seg_model.load_state_dict(state)
-                else:
-                    # assume full saved model
+                if isinstance(loaded, nn.Module):
                     seg_model = loaded
+                else:
+                    # If it's a dict containing 'model_state', you must use the correct UNet class
+                    seg_model = None  # you still need the correct architecture
+
             seg_model.to(device)
             seg_model.eval()
         except Exception as e:

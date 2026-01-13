@@ -15,5 +15,6 @@ ThyroTrack is a multimodal clinical AI system for thyroid nodule risk stratifica
 A complete overview of the motivation, methodology, architecture, and results of **ThyroTrack** is available here:
 
 🔗 [View Presentation Slides (PDF)](ThyroTrack_Presentation.pdf)
+🔗 [View Poster (PDF)](ThyroTrack_Poster.pdf)
 
 ![ThyroTrack Architecture](figures/architecture.png)

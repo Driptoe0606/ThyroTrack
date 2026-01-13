@@ -10,7 +10,7 @@ git checkout master
 
 ThyroTrack is a multimodal clinical AI system for thyroid nodule risk stratification that integrates ultrasound imaging, longitudinal clinical data, and patient similarity modeling. The platform combines CNN-based image feature extraction, GRU-based temporal hormone modeling, and GNN-based relational learning to move beyond static binary diagnosis and provide interpretable, individualized risk assessment aimed at reducing overdiagnosis and unnecessary thyroid surgery.
 
-## 📊 Presentation Slides
+## 📊 Project Visualizations
 
 A complete overview of the motivation, methodology, architecture, and results of **ThyroTrack** is available here:
 
